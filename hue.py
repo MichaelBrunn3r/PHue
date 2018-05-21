@@ -1,8 +1,7 @@
-import urllib.request
 import json
-import http.client
 import time
 import re
+import requests
 
 HUE_DEFAULT_TRANSITION_TIME = 4
 HUE_LIGHT_TYPES = {"Color light":{"supports_color":True, "supports_ct":False, "isDimmable":True}, \
@@ -26,16 +25,11 @@ class HueLightCapabilites:
         if self.isDimmable: self.mindimlevel = capabilities['control']['mindimlevel']
 
     def __str__(self):
-        attributes = list()
-        if hasattr(self, 'colorgamut'): attributes.append("'colorgamut':" + str(self.colorgamut))
-        if hasattr(self, 'ct'): attributes.append("'ct':" + str(self.ct))
-        if hasattr(self, 'mindimlevel'): attributes.append("'mindimlevel':" + str(self.mindimlevel))
-
-        serial = ""
-        for i in range(len(attributes)):
-            if i != 0: serial += ', '
-            serial += attributes[i]
-        return '{' + serial + '}'
+        attr = {}
+        if hasattr(self, 'colorgamut'): attr['colorgamut'] = self.colorgamut
+        if hasattr(self, 'ct'): attr['ct'] = self.ct
+        if hasattr(self, 'mindimlevel'): attr['mindimlevel'] = self.mindimlevel
+        return json.dumps(attr)
 
 
 class HueLightState:
@@ -55,17 +49,13 @@ class HueLightState:
         if sat != None: self.sat = sat
 
     def __str__(self):
-        attributes = list()
-        if hasattr(self, 'bri'): attributes.append("'bri':" + str(self.bri))
-        if hasattr(self, 'ct'): attributes.append("'ct':" + str(self.ct))
-        if hasattr(self, 'hue'): attributes.append("'hue':" + str(self.hue))
-        if hasattr(self, 'sat'): attributes.append("'sat':" + str(self.sat))
-
-        serial = ""
-        for i in range(len(attributes)):
-            if i != 0: serial += ', '
-            serial += attributes[i]
-        return '{' + serial + '}'
+        attr = {}
+        attr['on'] = self.on
+        if hasattr(self, 'bri'): attr['bri'] = self.bri
+        if hasattr(self, 'ct'): attr['ct'] = self.ct
+        if hasattr(self, 'hue'): attr['hue'] = self.hue
+        if hasattr(self, 'sat'): attr['sat'] = self.sat
+        return json.dumps(attr)
 
 
 class HueLight:
@@ -82,51 +72,39 @@ class HueLight:
         # State of the light
         self.state = state
 
-    def on(self, transition_time=HUE_DEFAULT_TRANSITION_TIME):
-        connection.request("PUT", "/api/" + username + "/lights/" + str(self.id) + "/state", \
-                            '{"on":true, "transitiontime":' + str(transition_time) + ', "bri":' + str(self.state.bri) + '}')
-        http_response = connection.getresponse()
-        json_response = json.loads(http_response.read().decode('utf-8'))
-        print(json_response)
+    def on(self, transitiontime=HUE_DEFAULT_TRANSITION_TIME):
+        requests.put(base_url + "/lights/" + str(self.id) + "/state", data=json.dumps({'on':True, 'transitiontime':transitiontime, 'bri':self.state.bri}))
         self.state.on = True
 
-    def off(self, transition_time=HUE_DEFAULT_TRANSITION_TIME):
-        connection.request("PUT", "/api/" + username + "/lights/" + str(self.id) + "/state", '{"on":false, "transitiontime":' + str(transition_time) + '}')
-        http_response = connection.getresponse()
-        json_response = json.loads(http_response.read().decode('utf-8'))
-        print(json_response)
+    def off(self, transitiontime=HUE_DEFAULT_TRANSITION_TIME):
+        requests.put(base_url + "/lights/" + str(self.id) + "/state", data=json.dumps({'on':False, 'transitiontime':transitiontime}))
         self.state.on = False
 
     def blink(self):
         if self.state.on:
             self.off(0)
+            time.sleep(1)
             self.on(0)
         else:
             self.on(0)
+            time.sleep(1)
             self.off(0)
 
     def __str__(self):
-        attributes = list()
-        attributes.append('"id":' + str(self.id))
-        attributes.append('"uniqueid:"' + str(self.uniqueid))
-        attributes.append('"modelid":' + str(self.modelid))
-        attributes.append('"name":' + str(self.name))
-        attributes.append('"capabilites":' + str(self.capabilities))
-
-        serial = ""
-        for i in range(len(attributes)):
-            if i != 0: serial += ', '
-            serial += attributes[i]
-        return '{' + serial + '}'
+        attr = {}
+        attr['id'] = self.id
+        attr['uniqueid'] = self.uniqueid
+        attr['modelid'] = self.modelid
+        attr['name'] = self.name
+        attr['state'] = json.loads(str(self.state))
+        attr['capabilities'] = json.loads(str(self.capabilities))
+        return json.dumps(attr)
 
 
-def hue_get_lights(connection, username):
-    connection.request("GET", "/api/" + username + "/lights")
-    http_response = connection.getresponse()
-    json_response = json.loads(http_response.read().decode('utf-8'))
+def hue_get_lights(username):
+    json_response = requests.get(base_url + '/lights').json()
 
     lights = list()
-
     for key,value in json_response.items():
         light_capabilities = HueLightCapabilites(value['type'], value['capabilities'])
         light_state = HueLightState(value['state']['on'], value['state'])
@@ -136,8 +114,9 @@ def hue_get_lights(connection, username):
 
 hue_bridge_ip = "192.168.0.100"
 username = "x5lCjhRO0qBi3rf4MGVh-5pSEPq5vcnKpCGV0O9q"
-connection = http.client.HTTPConnection(hue_bridge_ip)
-lights = hue_get_lights(connection, username)
+base_url = "http://" + hue_bridge_ip + "/api/" + username
+
+lights = hue_get_lights(username)
 current_light = None
 for light in lights: 
     if light.id == 10: current_light = light
