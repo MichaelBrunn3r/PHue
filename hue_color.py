@@ -60,4 +60,6 @@ def hex2rgb(hex, prefix='0x'):
     return tuple(int(hex[i:i+2],16) for i in range(0,5,2))
 
 def rgb2hex(rgb, prefix='0x'):
+    """ Converts a rgb color to its hexadecimal string representation.
+    """
     return prefix + '%X%X%X' % (rgb[0], rgb[1], rgb[2])
