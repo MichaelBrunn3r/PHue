@@ -1,7 +1,5 @@
 import json
-import time
 import requests
-from collections import deque
 import hue_color
 
 HUE_DEFAULT_TRANSITION_TIME = 4
@@ -11,76 +9,76 @@ HUE_LIGHT_TYPES = {"Color light":{"supports_color":True, "supports_ct":False, "d
                     "Dimmable light":{"supports_color":False, "supports_ct":False, "dimmable":True}}
 HUE_DEFAULT_USERNAME = "newdeveloper"
 
-class HueBridge(object):
-    def __init__(self, ip, username=HUE_DEFAULT_USERNAME):
+class HueBridge:
+    def __init__(self, ip, username):
         self.ip = ip
         self.username = username
-        self.base_url = 'http://' + self.ip + '/api/' + username
-        self.lights = self.get_lights()
-        self.sensors = self.get_sensors()
+        self.base_url = 'http://' + ip + '/api/' + username
 
     def _request(self, method, relative_url, data={}):
-        if method == 'GET': return requests.get(self.base_url + relative_url)
-        elif method == 'PUT': return requests.put(self.base_url + relative_url, json.dumps(data))
+        if method == 'GET': return requests.get(self.base_url + relative_url).json()
+        elif method == 'PUT': return requests.put(self.base_url + relative_url, json.dumps(data)).json()
 
-    def get_lights(self):
-        response = self._request('GET', HueLight.ROUTE).json()
+    def _request_groups(self):
+        group_states = self._request('GET', '/groups')
+        groups = dict()
+        for id, attr in group_states.items(): groups[id] = HueGroup(self, attr)
+        return groups
 
-        lights = dict()
-        for id, attr in response.items():
-            lights[id] = HueLight(self, id, attr)
+    def _request_scenes(self):
+        scene_states = self._request('GET', '/scenes')
+        scenes = dict()
+        for id, attr in scene_states.items(): scenes[id] = HueScene(attr)
+        return scenes
 
-        return lights
+    def get_group(self, name):
+        if not hasattr(self, 'groups'): self.groups = self._request_groups()
+        for id, group in self.groups.items():
+            if group.name == name: return { id : group}
+        return None
 
-    def get_sensors(self):
-        response = self._request('GET', HueSensor.ROUTE).json()
-        
-        sensors = dict()
-        for id, attr in response.items():
-            sensors[id] = HueSensor(self, id, attr)
+    def get_scene(self, group, name):
+        if not hasattr(self, 'scenes'): self.scenes = self._request_scenes()
 
-        return sensors
+        for id in self.scenes:
+            scene = self.scenes[id] 
+            if scene.name == name and scene.lights == group.lights: 
+                return { id : scene }
+        return None
 
 class HueApiObject:
-    def __init__(self, bridge, id, attr):
-        object.__setattr__(self, 'bridge', bridge)
-        object.__setattr__(self, 'id', id)
-
+    def __init__(self, attr):
         for attr_name, val in attr.items():
             object.__setattr__(self, attr_name, val)
 
     def __str__(self):
         return str(self.__dict__)
 
-class HueLight(HueApiObject):
-    ROUTE = '/lights'
+class HueGroup(HueApiObject):
+    ROUTE = '/groups'
 
-    def __init__(self, bridge, id, attr):
-        super().__init__(bridge, id, attr)
+    def __init__(self, bridge, attr):
+        super().__init__(attr)
 
-        light_type = HUE_LIGHT_TYPES.get(self.type)
-        if light_type != None:
-            self.dimmable = light_type['dimmable']
-            self.supports_color = light_type['supports_color']
-            self.supports_ct = light_type['supports_ct']
-            
+    def set_scene(self, bridge, group_id, scene_name):
+        scene_id, _ = bridge.get_scene(self, scene_name).popitem()
+        self.set_action(bridge, group_id, 'scene', scene_id)
 
-    def update_state(self, new_state, transitiontime=HUE_DEFAULT_TRANSITION_TIME):
-        relative_url = self.ROUTE + '/' + '10' + '/state'
+    def set_action(self, bridge, group_id, key, value):
+        path = self.ROUTE + '/' + group_id + '/action/'
+        responses = bridge._request('PUT', path, {key:value, 'ct':'wow'})
+        for response in responses:
+            response_type, response_value = response.popitem() 
+            if response_type == 'success':
+                key, value = response_value.popitem()
+                attr = key[len(path):]
+                self.action[attr] = value
 
-        result = dict()
-        for response in self.bridge._request('PUT', relative_url, new_state).json():
-            response_type, response_val = response.popitem()
+    def dim(self, bridge, group_id, amount):
+        self.set_action(bridge, group_id, 'bri', self.action['bri'] + amount)
 
-            if response_type == 'success': 
-                attr_name, attr_val = response_val.popitem()
-                attr_name = attr_name[len(relative_url+'/'):]
-                result[attr_name] = {'success':True, 'val':attr_val}
-                self.state.update({attr_name:attr_val})
-            elif response_type == 'error':
-                attr_name = response_val['address'][len(relative_url+'/'):]
-                result[attr_name] = {'success':False}
-        return result
-        
-class HueSensor(HueApiObject):
-    ROUTE = '/sensors'
+class HueScene(HueApiObject):
+    ROUTE = '/scenes'
+
+    def __init__(self, attr):
+        super().__init__(attr)
