@@ -15,17 +15,36 @@ class HueBridge:
         self.username = username
         self.base_url = 'http://' + ip + '/api/' + username
 
-    def _request(self, method, relative_url, data={}):
-        if method == 'GET': return requests.get(self.base_url + relative_url).json()
-        elif method == 'PUT': return requests.put(self.base_url + relative_url, json.dumps(data)).json()
+    def _request(self, method, res_location, data={}):
+        """
+        Requests resources from the Hue Bridge via HTTP
+
+        Params:
+        -------
+        arg1 : str 
+            The Name of the HTTP request method used
+        arg2 : str
+            The path to the relative location of the resource
+        arg3 : dict
+            Additional request data
+
+        Returns:
+        --------
+        dict
+            Dictionary containing the received resource
+        """
+        if method == 'GET': return requests.get(self.base_url + res_location).json()
+        elif method == 'PUT': return requests.put(self.base_url + res_location, json.dumps(data)).json()
 
     def _request_groups(self):
+        """ Helper method to get all current groups saved in the Hue Bridge """
         group_states = self._request('GET', '/groups')
         groups = dict()
         for id, attr in group_states.items(): groups[id] = HueGroup(self, attr)
         return groups
 
     def _request_scenes(self):
+        """ Helper method to get all current scenes saved in the Hue Bridge """
         scene_states = self._request('GET', '/scenes')
         scenes = dict()
         for id, attr in scene_states.items(): scenes[id] = HueScene(attr)
